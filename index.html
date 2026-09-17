@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Credenciamento XV SAN</title>
+<title>Credenciamento XX SAN</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Instrument+Serif&display=swap">
@@ -66,7 +66,7 @@
   #leitor img, #leitor__dashboard, #leitor__header_message { display: none !important; }
   #qr-shaded-region { border-color: transparent !important; }
   #qr-shaded-region > div { display: none !important; }
-  .mira { position: absolute; inset: 22%; pointer-events: none; }
+  .mira { position: absolute; inset: 14%; pointer-events: none; }
   .mira b { position: absolute; width: 28px; height: 28px; border: 2px solid var(--ouro); }
   .mira b:nth-child(1) { top: 0; left: 0; border-right: 0; border-bottom: 0; border-top-left-radius: 8px; }
   .mira b:nth-child(2) { top: 0; right: 0; border-left: 0; border-bottom: 0; border-top-right-radius: 8px; }
@@ -117,7 +117,7 @@
 
 <section class="tela" id="telaLeitor">
   <div class="topo">
-    <span class="marca">XV SAN <span>Credenciamento</span></span>
+    <span class="marca">XX SAN <span>Credenciamento</span></span>
   </div>
 
   <div class="dias" id="dias" role="group" aria-label="Dia do evento"></div>
@@ -194,7 +194,7 @@
 <script>
   const $ = id => document.getElementById(id);
 
-  let scanner = null, ocupado = false, ultimo = '', ultimoEm = 0, dia = 'Dia 1';
+  let scanner = null, ultimo = '', ultimoEm = 0, dia = 'Dia 1';
   let dias = [{ nome: 'Dia 1', data: '' }, { nome: 'Dia 2', data: '' }, { nome: 'Dia 3', data: '' }];
 
   function desenharDias() {
@@ -251,21 +251,42 @@
     .entrar();
 
   // registro
+  // Bipe curto: confirma a leitura na hora, sem esperar a planilha.
+  let audio = null;
+  function bipe() {
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      const o = audio.createOscillator(), g = audio.createGain();
+      o.frequency.value = 1320; g.gain.value = 0.08;
+      o.connect(g); g.connect(audio.destination);
+      o.start(); o.stop(audio.currentTime + 0.09);
+    } catch (e) {}
+  }
+
+  // Cada leitura é enviada em segundo plano: a câmera já fica livre para o próximo crachá.
+  let seq = 0;
   function registrar(texto) {
     const codigo = String(texto || '').replace(/\D/g, '');
     const agora = Date.now();
-    if (!codigo || ocupado || (codigo === ultimo && agora - ultimoEm < 4000)) return;
-    ultimo = codigo; ultimoEm = agora; ocupado = true;
-    mostrar('', 'Registrando…', '', codigo);
+    if (!codigo || (codigo === ultimo && agora - ultimoEm < 5000)) return;
+    ultimo = codigo; ultimoEm = agora;
+    const minha = ++seq, diaLido = dia;
+    bipe();
+    if (navigator.vibrate) navigator.vibrate(40);
+    mostrar('', 'Lido, registrando…', '', codigo);
     google.script.run
       .withSuccessHandler(r => {
-        ocupado = false; contador(r);
+        if (r.dia === dia && minha === seq) contador(r);
+        if (minha !== seq) return; // já existe uma leitura mais nova na tela
         if (r.status === 'OK') mostrar('ok', 'Chegada registrada no ' + r.dia, r.nome, r.codigo);
         else if (r.status === 'Duplicado') mostrar('repetido', 'Já chegou no ' + r.dia, r.nome, 'Primeira leitura às ' + r.primeira);
         else mostrar('erro', 'Código não encontrado', r.codigo, 'Confira o nome na lista de inscritos.');
       })
-      .withFailureHandler(err => { ocupado = false; ultimo = ''; mostrar('erro', 'Não foi possível registrar', '', err.message); })
-      .registrar(codigo, dia);
+      .withFailureHandler(err => {
+        if (codigo === ultimo) ultimo = '';
+        mostrar('erro', 'Não foi possível registrar ' + codigo, '', err.message + ' Leia o crachá de novo.');
+      })
+      .registrar(codigo, diaLido);
   }
 
   // câmera
@@ -276,8 +297,18 @@
   }
   $('btnCam').onclick = async () => {
     try {
-      scanner = new Html5Qrcode('leitor', { verbose: false });
-      await scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: (w, h) => { const s = Math.floor(Math.min(w, h) * .56); return { width: s, height: s }; } }, registrar);
+      scanner = new Html5Qrcode('leitor', {
+        verbose: false,
+        formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE], // só QR: decodifica mais rápido
+        experimentalFeatures: { useBarCodeDetectorIfSupported: true }, // leitor nativo do celular, quando existir
+      });
+      await scanner.start({ facingMode: 'environment' }, {
+        fps: 15,
+        qrbox: (w, h) => { const s = Math.floor(Math.min(w, h) * .72); return { width: s, height: s }; },
+        disableFlip: true,
+        // resolução maior: o QR da etiqueta é pequeno
+        videoConstraints: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 }, advanced: [{ focusMode: 'continuous' }] },
+      }, registrar);
       $('desligada').hidden = true; $('mira').hidden = false;
     } catch (e) {
       scanner = null;
