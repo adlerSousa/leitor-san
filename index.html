@@ -214,8 +214,14 @@
     if (nome === dia) return;
     dia = nome; ultimo = '';
     desenharDias();
+    // não deixa o número do dia anterior na tela enquanto a planilha responde
+    $('presentes').textContent = '…';
+    $('barra').style.width = '0%';
     mostrar('', 'Aponte a câmera para o QR do crachá', '', '');
-    google.script.run.withSuccessHandler(contador).resumoDoDia(dia);
+    google.script.run
+      .withSuccessHandler(contador)
+      .withFailureHandler(err => { if (nome === dia) mostrar('erro', 'Não foi possível atualizar o contador', '', err.message); })
+      .resumoDoDia(nome);
   }
 
   function contador(r) {
@@ -238,6 +244,7 @@
 
   // carregar dias e contador
   desenharDias();
+  $('presentes').textContent = '…';
   google.script.run
     .withSuccessHandler(r => { dias = r.dias; dia = r.resumo.dia; desenharDias(); contador(r.resumo); })
     .withFailureHandler(err => mostrar('erro', 'Não foi possível carregar a planilha', '', err.message))
