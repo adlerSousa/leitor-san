@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Credenciamento XV SAN</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Instrument+Serif&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+<style>
+  :root {
+    --areia: #efe6d6;
+    --superficie: #fbf7f0;
+    --linha: #dccfb6;
+    --ouro: #a8823a;
+    --ouro-escuro: #7a5c22;
+    --tinta: #2e2618;
+    --tinta-suave: #6d604a;
+    --ok: #4f7045;
+    --repetido: #b07d1c;
+    --erro: #a04636;
+    --sans: "Instrument Sans", "Segoe UI", system-ui, sans-serif;
+    --serif: "Instrument Serif", Georgia, serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--areia); color: var(--tinta);
+    font: 400 16px/1.45 var(--sans); -webkit-font-smoothing: antialiased;
+  }
+  .tela {
+    min-height: 100%; max-width: 460px; margin: 0 auto;
+    padding: calc(20px + env(safe-area-inset-top, 0px)) 20px calc(24px + env(safe-area-inset-bottom, 0px));
+    display: flex; flex-direction: column; gap: 20px;
+  }
+  [hidden] { display: none !important; }
+
+  /* topo */
+  .topo { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .marca { font-weight: 600; font-size: 15px; letter-spacing: .01em; }
+  .marca span { color: var(--ouro-escuro); font-weight: 500; }
+
+  /* dias */
+  .dias { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px; background: var(--superficie); border: 1px solid var(--linha); border-radius: 999px; }
+  .dias button {
+    appearance: none; border: 0; border-radius: 999px; padding: 8px 4px; background: transparent; color: var(--tinta-suave);
+    font: 600 14px/1.15 var(--sans); cursor: pointer; display: grid; gap: 1px; transition: background .2s, color .2s;
+  }
+  .dias button small { font-weight: 400; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .dias button[aria-pressed="true"] { background: var(--ouro); color: #fff; }
+  .dias button .hoje { font-style: normal; }
+
+  /* contador */
+  .contador { display: grid; gap: 8px; }
+  .contador p { margin: 0; font-size: 14px; color: var(--tinta-suave); font-variant-numeric: tabular-nums; }
+  .contador strong { color: var(--tinta); font-weight: 600; font-size: 22px; margin-right: 4px; }
+  .barra { height: 3px; background: var(--linha); border-radius: 2px; overflow: hidden; }
+  .barra i { display: block; height: 100%; width: 0; background: var(--ouro); transition: width .5s ease; }
+
+  /* câmera */
+  .visor { position: relative; aspect-ratio: 1; border-radius: 20px; overflow: hidden; background: var(--tinta); }
+  #leitor { position: absolute; inset: 0; }
+  #leitor video { width: 100% !important; height: 100% !important; object-fit: cover; }
+  #leitor img, #leitor__dashboard, #leitor__header_message { display: none !important; }
+  #qr-shaded-region { border-color: transparent !important; }
+  #qr-shaded-region > div { display: none !important; }
+  .mira { position: absolute; inset: 22%; pointer-events: none; }
+  .mira b { position: absolute; width: 28px; height: 28px; border: 2px solid var(--ouro); }
+  .mira b:nth-child(1) { top: 0; left: 0; border-right: 0; border-bottom: 0; border-top-left-radius: 8px; }
+  .mira b:nth-child(2) { top: 0; right: 0; border-left: 0; border-bottom: 0; border-top-right-radius: 8px; }
+  .mira b:nth-child(3) { bottom: 0; left: 0; border-right: 0; border-top: 0; border-bottom-left-radius: 8px; }
+  .mira b:nth-child(4) { bottom: 0; right: 0; border-left: 0; border-top: 0; border-bottom-right-radius: 8px; }
+  .desligada { position: absolute; inset: 0; display: grid; place-content: center; gap: 14px; text-align: center; color: var(--areia); padding: 24px; }
+  .desligada p { margin: 0; font-size: 15px; color: #cbbd9f; }
+
+  /* resultado */
+  .resultado { min-height: 118px; display: grid; align-content: start; gap: 4px; }
+  .estado { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500; color: var(--tinta-suave); }
+  .estado::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--linha); flex: none; }
+  .resultado[data-tipo="ok"] .estado { color: var(--ok); }
+  .resultado[data-tipo="ok"] .estado::before { background: var(--ok); }
+  .resultado[data-tipo="repetido"] .estado { color: var(--repetido); }
+  .resultado[data-tipo="repetido"] .estado::before { background: var(--repetido); }
+  .resultado[data-tipo="erro"] .estado { color: var(--erro); }
+  .resultado[data-tipo="erro"] .estado::before { background: var(--erro); }
+  .nome { margin: 0; font: 400 38px/1.05 var(--serif); letter-spacing: -.005em; text-wrap: balance; overflow-wrap: anywhere; }
+  .detalhe { margin: 0; font-size: 14px; color: var(--tinta-suave); font-variant-numeric: tabular-nums; }
+  .resultado.novo .nome { animation: surgir .35s ease-out; }
+  @keyframes surgir { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+  /* controles */
+  .botao {
+    appearance: none; border: 0; border-radius: 999px; padding: 15px 22px; width: 100%;
+    font: 600 16px var(--sans); background: var(--tinta); color: var(--superficie); cursor: pointer;
+  }
+  .botao.ouro { background: var(--ouro); color: #fff; }
+  label.botao { display: block; text-align: center; }
+  .invisivel { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; pointer-events: none; }
+  .botao.linha { background: transparent; color: var(--tinta); border: 1px solid var(--linha); }
+  .botao:disabled { opacity: .5; }
+  .acoes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .manual { display: flex; gap: 8px; }
+  .campo {
+    width: 100%; border: 1px solid var(--linha); background: var(--superficie); color: var(--tinta);
+    border-radius: 14px; padding: 14px 16px; font: 500 16px var(--sans);
+  }
+  .campo::placeholder { color: #a99b80; }
+  .manual .botao { width: auto; flex: none; }
+  :focus-visible { outline: 2px solid var(--ouro); outline-offset: 2px; }
+
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+
+<section class="tela" id="telaLeitor">
+  <div class="topo">
+    <span class="marca">XV SAN <span>Credenciamento</span></span>
+  </div>
+
+  <div class="dias" id="dias" role="group" aria-label="Dia do evento"></div>
+
+  <div class="contador">
+    <p><strong id="presentes">0</strong> de <span id="inscritos">0</span> participantes chegaram no <span id="diaAtual">Dia 1</span></p>
+    <div class="barra"><i id="barra"></i></div>
+  </div>
+
+  <div class="visor">
+    <div id="leitor"></div>
+    <div class="mira" id="mira" hidden><b></b><b></b><b></b><b></b></div>
+    <div class="desligada" id="desligada">
+      <p>A câmera está desligada</p>
+      <button class="botao ouro" id="btnCam" type="button">Ligar câmera</button>
+    </div>
+  </div>
+
+  <div class="resultado" id="resultado" aria-live="polite">
+    <span class="estado" id="estado">Aponte a câmera para o QR do crachá</span>
+    <p class="nome" id="nome"></p>
+    <p class="detalhe" id="detalhe"></p>
+  </div>
+
+  <div class="acoes">
+    <label class="botao linha" id="btnFoto" for="arquivo">Ler por foto</label>
+    <button class="botao linha" id="btnDigitar" type="button">Digitar código</button>
+  </div>
+  <form class="manual" id="formManual" hidden>
+    <input class="campo" id="manual" placeholder="12345678" inputmode="numeric" maxlength="8" autocomplete="off">
+    <button class="botao" type="submit">Registrar</button>
+  </form>
+  <input class="invisivel" id="arquivo" type="file" accept="image/*" capture="environment">
+</section>
+
+<script>
+  // ▼▼▼ COLE AQUI A URL DO APP DA WEB (a que termina em /exec) ▼▼▼
+  const API_URL = 'COLE_AQUI_A_URL_DO_SCRIPT';
+  // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+
+  // Conversa com a planilha pela URL do script.
+  async function chamarPlanilha(params) {
+    if (!/^https:\/\/script\.google\.com\/.+\/exec/.test(API_URL)) {
+      throw new Error('Cole a URL do script (termina em /exec) no início deste arquivo.');
+    }
+    const url = API_URL + '?' + new URLSearchParams({ ...params, t: Date.now() });
+    let r;
+    try { r = await fetch(url, { redirect: 'follow' }); }
+    catch (e) { throw new Error('Sem conexão com a planilha. Verifique a internet.'); }
+    const json = await r.json();
+    if (!json.ok) throw new Error(json.erro);
+    return json.dados;
+  }
+  const ACOES = {
+    entrar: () => ({ acao: 'entrar' }),
+    resumoDoDia: dia => ({ acao: 'resumo', dia }),
+    registrar: (codigo, dia) => ({ acao: 'registrar', codigo, dia }),
+  };
+  // Mantém a mesma forma de chamada da versão dentro do Google.
+  const google = { script: { get run() {
+    const cb = { ok: null, falha: null };
+    const api = {
+      withSuccessHandler(f) { cb.ok = f; return api; },
+      withFailureHandler(f) { cb.falha = f; return api; },
+    };
+    Object.keys(ACOES).forEach(nome => {
+      api[nome] = (...args) => chamarPlanilha(ACOES[nome](...args))
+        .then(d => cb.ok && cb.ok(d))
+        .catch(e => cb.falha ? cb.falha(e) : console.error(e));
+    });
+    return api;
+  } } };
+</script>
+<script>
+  const $ = id => document.getElementById(id);
+
+  let scanner = null, ocupado = false, ultimo = '', ultimoEm = 0, dia = 'Dia 1';
+  let dias = [{ nome: 'Dia 1', data: '' }, { nome: 'Dia 2', data: '' }, { nome: 'Dia 3', data: '' }];
+
+  function desenharDias() {
+    $('dias').innerHTML = '';
+    dias.forEach(d => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.setAttribute('aria-pressed', d.nome === dia);
+      b.innerHTML = `<span>${d.nome}</span><small>${d.hoje ? 'Hoje' : (d.data || '&nbsp;')}</small>`;
+      b.onclick = () => escolherDia(d.nome);
+      $('dias').appendChild(b);
+    });
+    $('diaAtual').textContent = dia;
+  }
+
+  function escolherDia(nome) {
+    if (nome === dia) return;
+    dia = nome; ultimo = '';
+    desenharDias();
+    mostrar('', 'Aponte a câmera para o QR do crachá', '', '');
+    google.script.run.withSuccessHandler(contador).resumoDoDia(dia);
+  }
+
+  function contador(r) {
+    if (!r) return;
+    if (r.dia && r.dia !== dia) return;
+    $('presentes').textContent = r.presentes;
+    $('inscritos').textContent = r.inscritos;
+    $('barra').style.width = (r.inscritos ? Math.min(100, r.presentes / r.inscritos * 100) : 0) + '%';
+  }
+
+  function mostrar(tipo, estado, nome, detalhe) {
+    const box = $('resultado');
+    box.dataset.tipo = tipo || '';
+    $('estado').textContent = estado;
+    $('nome').textContent = nome || '';
+    $('detalhe').textContent = detalhe || '';
+    box.classList.remove('novo'); void box.offsetWidth; box.classList.add('novo');
+    if (navigator.vibrate && tipo) navigator.vibrate(tipo === 'ok' ? 90 : [70, 60, 70]);
+  }
+
+  // carregar dias e contador
+  desenharDias();
+  google.script.run
+    .withSuccessHandler(r => { dias = r.dias; dia = r.resumo.dia; desenharDias(); contador(r.resumo); })
+    .withFailureHandler(err => mostrar('erro', 'Não foi possível carregar a planilha', '', err.message))
+    .entrar();
+
+  // registro
+  function registrar(texto) {
+    const codigo = String(texto || '').replace(/\D/g, '');
+    const agora = Date.now();
+    if (!codigo || ocupado || (codigo === ultimo && agora - ultimoEm < 4000)) return;
+    ultimo = codigo; ultimoEm = agora; ocupado = true;
+    mostrar('', 'Registrando…', '', codigo);
+    google.script.run
+      .withSuccessHandler(r => {
+        ocupado = false; contador(r);
+        if (r.status === 'OK') mostrar('ok', 'Chegada registrada no ' + r.dia, r.nome, r.codigo);
+        else if (r.status === 'Duplicado') mostrar('repetido', 'Já chegou no ' + r.dia, r.nome, 'Primeira leitura às ' + r.primeira);
+        else mostrar('erro', 'Código não encontrado', r.codigo, 'Confira o nome na lista de inscritos.');
+      })
+      .withFailureHandler(err => { ocupado = false; ultimo = ''; mostrar('erro', 'Não foi possível registrar', '', err.message); })
+      .registrar(codigo, dia);
+  }
+
+  // câmera
+  async function pararCamera() {
+    if (!scanner) return;
+    try { await scanner.stop(); } catch (e) {}
+    scanner = null; $('desligada').hidden = false; $('mira').hidden = true;
+  }
+  $('btnCam').onclick = async () => {
+    try {
+      scanner = new Html5Qrcode('leitor', { verbose: false });
+      await scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: (w, h) => { const s = Math.floor(Math.min(w, h) * .56); return { width: s, height: s }; } }, registrar);
+      $('desligada').hidden = true; $('mira').hidden = false;
+    } catch (e) {
+      scanner = null;
+      mostrar('erro', 'A câmera não abriu', '', 'Permita o uso da câmera ou use “Ler por foto”.');
+    }
+  };
+  document.addEventListener('visibilitychange', () => { if (document.hidden) pararCamera(); });
+
+  // foto e digitação
+  function carregarImagem(arquivo) {
+    return new Promise((ok, falha) => {
+      const url = URL.createObjectURL(arquivo);
+      const img = new Image();
+      img.onload = () => { URL.revokeObjectURL(url); ok(img); };
+      img.onerror = () => { URL.revokeObjectURL(url); falha(new Error('Não foi possível abrir a foto.')); };
+      img.src = url;
+    });
+  }
+
+  // Fotos de celular são grandes e o QR da etiqueta é pequeno:
+  // tenta a foto inteira e o centro, em alguns tamanhos, até achar o código.
+  async function lerQrDaFoto(arquivo) {
+    if (typeof jsQR !== 'function') throw new Error('O leitor de fotos não carregou. Verifique a internet e recarregue a página.');
+    const img = await carregarImagem(arquivo);
+    const W = img.naturalWidth, H = img.naturalHeight;
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    for (const recorte of [1, 0.6, 0.35]) {
+      for (const lado of [1000, 1600, 700, 2400]) {
+        const sw = W * recorte, sh = H * recorte;
+        const escala = Math.min(1, lado / Math.max(sw, sh));
+        canvas.width = Math.round(sw * escala);
+        canvas.height = Math.round(sh * escala);
+        ctx.drawImage(img, (W - sw) / 2, (H - sh) / 2, sw, sh, 0, 0, canvas.width, canvas.height);
+        const px = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const qr = jsQR(px.data, px.width, px.height, { inversionAttempts: 'attemptBoth' });
+        if (qr && qr.data) return qr.data;
+      }
+    }
+    throw new Error('Nenhum QR na foto');
+  }
+
+  $('arquivo').onchange = async e => {
+    const f = e.target.files[0]; if (!f) return;
+    e.target.value = '';
+    await pararCamera();
+    mostrar('', 'Procurando o QR na foto…', '', '');
+    try { const txt = await lerQrDaFoto(f); ultimo = ''; registrar(txt); }
+    catch (err) {
+      const semQr = err.message === 'Nenhum QR na foto';
+      mostrar('erro', semQr ? 'Nenhum QR na foto' : 'Não foi possível ler a foto', '',
+        semQr ? 'Enquadre só a etiqueta, bem de perto e com boa luz.' : err.message);
+    }
+  };
+  $('btnDigitar').onclick = () => { $('formManual').hidden = !$('formManual').hidden; if (!$('formManual').hidden) $('manual').focus(); };
+  $('formManual').addEventListener('submit', e => { e.preventDefault(); ultimo = ''; registrar($('manual').value); $('manual').value = ''; });
+</script>
+</body>
+</html>
