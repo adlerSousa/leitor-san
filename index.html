@@ -160,10 +160,17 @@
       throw new Error('Cole a URL do script (termina em /exec) no início deste arquivo.');
     }
     const url = API_URL + '?' + new URLSearchParams({ ...params, t: Date.now() });
-    let r;
-    try { r = await fetch(url, { redirect: 'follow' }); }
-    catch (e) { throw new Error('Sem conexão com a planilha. Verifique a internet.'); }
-    const json = await r.json();
+    const controle = new AbortController();
+    const limite = setTimeout(() => controle.abort(), 20000);
+    let json;
+    try {
+      const r = await fetch(url, { redirect: 'follow', signal: controle.signal });
+      json = await r.json();
+    } catch (e) {
+      throw new Error(e.name === 'AbortError' ? 'A planilha demorou para responder.' : 'Sem conexão com a planilha. Verifique a internet.');
+    } finally {
+      clearTimeout(limite);
+    }
     if (!json.ok) throw new Error(json.erro);
     return json.dados;
   }
@@ -260,27 +267,60 @@
   }
 
   // Cada leitura é enviada em segundo plano: a câmera já fica livre para o próximo crachá.
-  let seq = 0;
+  // Um mesmo crachá nunca é enviado duas vezes ao mesmo tempo, e quem já foi confirmado
+  // neste celular aparece na hora, sem nova consulta à planilha.
+  const pendentes = new Set();      // "Dia 1|47155104" enviados aguardando resposta
+  const conhecidos = new Map();     // "Dia 1|47155104" → resposta já recebida
+  let naTela = '';                  // código cujo resultado está (ou será) exibido
+
+  function horaAgora() {
+    const d = new Date();
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  }
+
+  function exibirResultado(r) {
+    if (r.status === 'OK') mostrar('ok', 'Chegada registrada no ' + r.dia, r.nome, r.codigo);
+    else if (r.status === 'Duplicado') mostrar('repetido', 'Já chegou no ' + r.dia, r.nome, 'Primeira leitura às ' + r.primeira);
+    else mostrar('erro', 'Código não encontrado', r.codigo, 'Confira o nome na lista de inscritos.');
+  }
+
   function registrar(texto) {
     const codigo = String(texto || '').replace(/\D/g, '');
+    if (!codigo) return;
+    const chave = dia + '|' + codigo;
     const agora = Date.now();
-    if (!codigo || (codigo === ultimo && agora - ultimoEm < 5000)) return;
-    ultimo = codigo; ultimoEm = agora;
-    const minha = ++seq, diaLido = dia;
+    const repetidoAgora = codigo === ultimo && agora - ultimoEm < 3000;
+    if (pendentes.has(chave) || repetidoAgora) return;
+    const conhecido = conhecidos.get(chave);
+    // mesmo crachá ainda parado na frente da câmera: mantém o resultado que já está na tela
+    if (conhecido && codigo === naTela) { ultimo = codigo; ultimoEm = agora; return; }
+    ultimo = codigo; ultimoEm = agora; naTela = codigo;
+
+    if (conhecido) {
+      if (navigator.vibrate) navigator.vibrate([40, 40, 40]);
+      exibirResultado(conhecido);
+      return;
+    }
+
+    pendentes.add(chave);
     bipe();
     if (navigator.vibrate) navigator.vibrate(40);
     mostrar('', 'Lido, registrando…', '', codigo);
+    const diaLido = dia;
     google.script.run
       .withSuccessHandler(r => {
-        if (r.dia === dia && minha === seq) contador(r);
-        if (minha !== seq) return; // já existe uma leitura mais nova na tela
-        if (r.status === 'OK') mostrar('ok', 'Chegada registrada no ' + r.dia, r.nome, r.codigo);
-        else if (r.status === 'Duplicado') mostrar('repetido', 'Já chegou no ' + r.dia, r.nome, 'Primeira leitura às ' + r.primeira);
-        else mostrar('erro', 'Código não encontrado', r.codigo, 'Confira o nome na lista de inscritos.');
+        pendentes.delete(chave);
+        // próximas leituras deste crachá neste dia já sabem que ele chegou
+        conhecidos.set(chave, r.status === 'OK' ? { ...r, status: 'Duplicado', primeira: horaAgora() } : r);
+        if (r.dia === dia) contador(r);
+        if (naTela === codigo) exibirResultado(r);
       })
       .withFailureHandler(err => {
-        if (codigo === ultimo) ultimo = '';
-        mostrar('erro', 'Não foi possível registrar ' + codigo, '', err.message + ' Leia o crachá de novo.');
+        pendentes.delete(chave);
+        if (naTela === codigo) {
+          ultimo = '';
+          mostrar('erro', 'Não foi possível registrar ' + codigo, '', err.message + ' Leia o crachá de novo.');
+        }
       })
       .registrar(codigo, diaLido);
   }
