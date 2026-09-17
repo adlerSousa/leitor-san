@@ -254,17 +254,8 @@
     .entrar();
 
   // registro
-  // Bipe curto: confirma a leitura na hora, sem esperar a planilha.
-  let audio = null;
-  function bipe() {
-    try {
-      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
-      const o = audio.createOscillator(), g = audio.createGain();
-      o.frequency.value = 1320; g.gain.value = 0.08;
-      o.connect(g); g.connect(audio.destination);
-      o.start(); o.stop(audio.currentTime + 0.09);
-    } catch (e) {}
-  }
+  // Sem som: no iPhone, tocar áudio pode pausar a câmera. A confirmação é visual (e vibração no Android).
+  function bipe() {}
 
   // Cada leitura é enviada em segundo plano: a câmera já fica livre para o próximo crachá.
   // Um mesmo crachá nunca é enviado duas vezes ao mesmo tempo, e quem já foi confirmado
@@ -342,16 +333,22 @@
       .catch(() => {});
   }
 
+  let ultimoTempoVideo = -1, paradoDesde = 0;
   async function lerQuadro() {
     if (!stream) return;
-    const W = video.videoWidth, H = video.videoHeight;
-    if (W && H && video.readyState >= 2) {
-      const lado = Math.round(Math.min(W, H) * RECORTE);
-      const alvo = Math.min(lado, 640);
-      quadro.width = alvo; quadro.height = alvo;
-      qctx.drawImage(video, (W - lado) / 2, (H - lado) / 2, lado, lado, 0, 0, alvo, alvo);
-      let texto = null;
-      try {
+    try {
+      // No iPhone o vídeo pode pausar sozinho (ex.: ao tocar som): religa para não congelar a imagem.
+      if (video.paused) video.play().catch(() => {});
+      if (video.currentTime !== ultimoTempoVideo) { ultimoTempoVideo = video.currentTime; paradoDesde = Date.now(); }
+      else if (Date.now() - paradoDesde > 1500) { video.play().catch(() => {}); paradoDesde = Date.now(); }
+
+      const W = video.videoWidth, H = video.videoHeight;
+      if (W && H && video.readyState >= 2) {
+        const lado = Math.round(Math.min(W, H) * RECORTE);
+        const alvo = Math.min(lado, 640);
+        quadro.width = alvo; quadro.height = alvo;
+        qctx.drawImage(video, (W - lado) / 2, (H - lado) / 2, lado, lado, 0, 0, alvo, alvo);
+        let texto = null;
         if (detector) {
           const achados = await detector.detect(quadro);
           if (achados.length) texto = achados[0].rawValue;
@@ -360,10 +357,14 @@
           const qr = jsQR(px.data, alvo, alvo, { inversionAttempts: 'dontInvert' });
           if (qr) texto = qr.data;
         }
-      } catch (e) {}
-      if (texto) registrar(texto);
+        if (texto) registrar(texto);
+      }
+    } catch (e) {
+      console.error('Falha ao analisar quadro da câmera', e);
+    } finally {
+      // o ciclo continua sempre, mesmo se algo acima falhar
+      if (stream) laco = setTimeout(lerQuadro, 60);
     }
-    laco = setTimeout(lerQuadro, 60);
   }
 
   async function pararCamera() {
