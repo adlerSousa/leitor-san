@@ -7,7 +7,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Instrument+Serif&display=swap">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
 <style>
   :root {
@@ -62,11 +61,8 @@
   /* câmera */
   .visor { position: relative; aspect-ratio: 1; border-radius: 20px; overflow: hidden; background: var(--tinta); }
   #leitor { position: absolute; inset: 0; }
-  #leitor video { width: 100% !important; height: 100% !important; object-fit: cover; }
-  #leitor img, #leitor__dashboard, #leitor__header_message { display: none !important; }
-  #qr-shaded-region { border-color: transparent !important; }
-  #qr-shaded-region > div { display: none !important; }
-  .mira { position: absolute; inset: 14%; pointer-events: none; }
+  #leitor video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .mira { position: absolute; inset: 20%; pointer-events: none; }
   .mira b { position: absolute; width: 28px; height: 28px; border: 2px solid var(--ouro); }
   .mira b:nth-child(1) { top: 0; left: 0; border-right: 0; border-bottom: 0; border-top-left-radius: 8px; }
   .mira b:nth-child(2) { top: 0; right: 0; border-left: 0; border-bottom: 0; border-top-right-radius: 8px; }
@@ -194,7 +190,7 @@
 <script>
   const $ = id => document.getElementById(id);
 
-  let scanner = null, ultimo = '', ultimoEm = 0, dia = 'Dia 1';
+  let ultimo = '', ultimoEm = 0, dia = 'Dia 1';
   let dias = [{ nome: 'Dia 1', data: '' }, { nome: 'Dia 2', data: '' }, { nome: 'Dia 3', data: '' }];
 
   function desenharDias() {
@@ -290,29 +286,75 @@
   }
 
   // câmera
-  async function pararCamera() {
-    if (!scanner) return;
-    try { await scanner.stop(); } catch (e) {}
-    scanner = null; $('desligada').hidden = false; $('mira').hidden = true;
+  // A área analisada é o centro do vídeo real, calculada a partir do tamanho do quadro
+  // (não do tamanho na tela), e corresponde ao quadrado dourado.
+  const RECORTE = 0.6;          // fração do lado menor do vídeo analisada
+  let stream = null, laco = null, detector = null;
+  const video = document.createElement('video');
+  video.setAttribute('playsinline', ''); video.setAttribute('muted', ''); video.muted = true; video.autoplay = true;
+  $('leitor').appendChild(video);
+  const quadro = document.createElement('canvas');
+  const qctx = quadro.getContext('2d', { willReadFrequently: true });
+
+  if ('BarcodeDetector' in window && BarcodeDetector.getSupportedFormats) {
+    BarcodeDetector.getSupportedFormats()
+      .then(f => { if (f.includes('qr_code')) detector = new BarcodeDetector({ formats: ['qr_code'] }); })
+      .catch(() => {});
   }
+
+  async function lerQuadro() {
+    if (!stream) return;
+    const W = video.videoWidth, H = video.videoHeight;
+    if (W && H && video.readyState >= 2) {
+      const lado = Math.round(Math.min(W, H) * RECORTE);
+      const alvo = Math.min(lado, 640);
+      quadro.width = alvo; quadro.height = alvo;
+      qctx.drawImage(video, (W - lado) / 2, (H - lado) / 2, lado, lado, 0, 0, alvo, alvo);
+      let texto = null;
+      try {
+        if (detector) {
+          const achados = await detector.detect(quadro);
+          if (achados.length) texto = achados[0].rawValue;
+        } else {
+          const px = qctx.getImageData(0, 0, alvo, alvo);
+          const qr = jsQR(px.data, alvo, alvo, { inversionAttempts: 'dontInvert' });
+          if (qr) texto = qr.data;
+        }
+      } catch (e) {}
+      if (texto) registrar(texto);
+    }
+    laco = setTimeout(lerQuadro, 60);
+  }
+
+  async function pararCamera() {
+    clearTimeout(laco);
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    stream = null; video.srcObject = null;
+    $('desligada').hidden = false; $('mira').hidden = true;
+  }
+
   $('btnCam').onclick = async () => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      mostrar('erro', 'A câmera não está disponível aqui', '', 'Abra o leitor pelo link do site (https) no Safari ou no Chrome.');
+      return;
+    }
     try {
-      scanner = new Html5Qrcode('leitor', {
-        verbose: false,
-        formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE], // só QR: decodifica mais rápido
-        experimentalFeatures: { useBarCodeDetectorIfSupported: true }, // leitor nativo do celular, quando existir
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
       });
-      await scanner.start({ facingMode: 'environment' }, {
-        fps: 15,
-        qrbox: (w, h) => { const s = Math.floor(Math.min(w, h) * .72); return { width: s, height: s }; },
-        disableFlip: true,
-        // resolução maior: o QR da etiqueta é pequeno
-        videoConstraints: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 }, advanced: [{ focusMode: 'continuous' }] },
-      }, registrar);
+      const faixa = stream.getVideoTracks()[0];
+      if (faixa && faixa.applyConstraints) faixa.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(() => {});
+      video.srcObject = stream;
+      await video.play();
       $('desligada').hidden = true; $('mira').hidden = false;
+      mostrar('', 'Aponte para o QR do crachá, a uns 10 a 15 cm', '', '');
+      lerQuadro();
     } catch (e) {
-      scanner = null;
-      mostrar('erro', 'A câmera não abriu', '', 'Permita o uso da câmera ou use “Ler por foto”.');
+      await pararCamera();
+      const negado = e && (e.name === 'NotAllowedError' || e.name === 'SecurityError');
+      mostrar('erro', negado ? 'Sem permissão para a câmera' : 'A câmera não abriu', '',
+        negado ? 'No iPhone: Ajustes › Safari › Câmera › Permitir. Depois recarregue a página.' : 'Use “Ler por foto” ou “Digitar código”.');
     }
   };
   document.addEventListener('visibilitychange', () => { if (document.hidden) pararCamera(); });
